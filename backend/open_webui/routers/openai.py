@@ -300,6 +300,14 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
                     user=user,
                 )
             )
+            if "api.openai.com" in url:
+                request_tasks.append(
+                    send_get_request(
+                        f"{url}/assistants",
+                        request.app.state.config.OPENAI_API_KEYS[idx],
+                        user=user,
+                    )
+                )
         else:
             api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
                 str(idx),
@@ -320,6 +328,14 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
                             user=user,
                         )
                     )
+                    if "api.openai.com" in url:
+                        request_tasks.append(
+                            send_get_request(
+                                f"{url}/assistants",
+                                request.app.state.config.OPENAI_API_KEYS[idx],
+                                user=user,
+                            )
+                        )
                 else:
                     model_list = {
                         "object": "list",
@@ -340,26 +356,35 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
                     )
             else:
                 request_tasks.append(asyncio.ensure_future(asyncio.sleep(0, None)))
+                if "api.openai.com" in url:
+                    request_tasks.append(asyncio.ensure_future(asyncio.sleep(0, None)))
 
     responses = await asyncio.gather(*request_tasks)
 
-    for idx, response in enumerate(responses):
-        if response:
-            url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
-            api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
-                str(idx),
-                request.app.state.config.OPENAI_API_CONFIGS.get(
-                    url, {}
-                ),  # Legacy support
-            )
+    grouped_responses = []
+    for idx in range(len(request.app.state.config.OPENAI_API_BASE_URLS)):
+        model_resp = responses[idx * 2] if len(responses) > idx * 2 else None
+        assistant_resp = responses[idx * 2 + 1] if len(responses) > idx * 2 + 1 else None
 
-            connection_type = api_config.get("connection_type", "external")
-            prefix_id = api_config.get("prefix_id", None)
-            tags = api_config.get("tags", [])
+        combined = []
+        url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
+        api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
+            str(idx),
+            request.app.state.config.OPENAI_API_CONFIGS.get(
+                url, {}
+            ),  # Legacy support
+        )
 
-            for model in (
-                response if isinstance(response, list) else response.get("data", [])
-            ):
+        connection_type = api_config.get("connection_type", "external")
+        prefix_id = api_config.get("prefix_id", None)
+        tags = api_config.get("tags", [])
+
+        for resp in [model_resp, assistant_resp]:
+            if not resp:
+                continue
+
+            data = resp if isinstance(resp, list) else resp.get("data", [])
+            for model in data:
                 if prefix_id:
                     model["id"] = f"{prefix_id}.{model['id']}"
 
@@ -368,6 +393,16 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
 
                 if connection_type:
                     model["connection_type"] = connection_type
+
+                if resp is assistant_resp:
+                    model["is_assistant"] = True
+
+                combined.append(model)
+
+        grouped_responses.append(combined)
+
+    log.debug(f"get_all_models:responses() {grouped_responses}")
+    return grouped_responses
 
     log.debug(f"get_all_models:responses() {responses}")
     return responses
@@ -396,10 +431,10 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
     responses = await get_all_models_responses(request, user=user)
 
     def extract_data(response):
-        if response and "data" in response:
-            return response["data"]
         if isinstance(response, list):
             return response
+        if response and "data" in response:
+            return response["data"]
         return None
 
     def merge_models_lists(model_lists):
@@ -690,6 +725,70 @@ def convert_to_azure_payload(
     return url, payload
 
 
+async def run_openai_assistant(url: str, key: str, assistant_id: str, messages: list[dict]):
+    async with aiohttp.ClientSession(trust_env=True) as session:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+        }
+
+        async with session.post(
+            f"{url}/threads",
+            headers=headers,
+            json={"messages": messages},
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+        ) as r:
+            r.raise_for_status()
+            thread = await r.json()
+
+        thread_id = thread.get("id")
+
+        async with session.post(
+            f"{url}/threads/{thread_id}/runs",
+            headers=headers,
+            json={"assistant_id": assistant_id},
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+        ) as r:
+            r.raise_for_status()
+            run = await r.json()
+
+        run_id = run.get("id")
+
+        status = run.get("status")
+        while status not in ["completed", "failed", "cancelled", "expired"]:
+            await asyncio.sleep(1)
+            async with session.get(
+                f"{url}/threads/{thread_id}/runs/{run_id}",
+                headers=headers,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as r:
+                r.raise_for_status()
+                run = await r.json()
+                status = run.get("status")
+
+        if status != "completed":
+            raise Exception(f"Run status: {status}")
+
+        async with session.get(
+            f"{url}/threads/{thread_id}/messages",
+            headers=headers,
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+        ) as r:
+            r.raise_for_status()
+            messages_res = await r.json()
+
+        for msg in messages_res.get("data", []):
+            if msg.get("role") == "assistant":
+                parts = msg.get("content", [])
+                if parts and parts[0].get("type") == "text":
+                    text = parts[0]["text"]["value"]
+                    return {
+                        "choices": [{"message": {"role": "assistant", "content": text}}]
+                    }
+
+        return {"choices": []}
+
+
 @router.post("/chat/completions")
 async def generate_chat_completion(
     request: Request,
@@ -770,6 +869,13 @@ async def generate_chat_completion(
 
     url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
     key = request.app.state.config.OPENAI_API_KEYS[idx]
+
+    if model.get("is_assistant") and "api.openai.com" in url:
+        try:
+            return await run_openai_assistant(url, key, model_id, payload.get("messages", []))
+        except Exception as e:
+            log.exception(e)
+            raise HTTPException(status_code=500, detail=str(e))
 
     # Check if model is from "o" series
     is_o_series = payload["model"].lower().startswith(("o1", "o3", "o4"))
