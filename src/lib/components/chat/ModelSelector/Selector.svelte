@@ -22,13 +22,14 @@
 		config
 	} from '$lib/stores';
 	import { toast } from 'svelte-sonner';
-	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
-	import { getModels } from '$lib/apis';
+import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
+import { getModels } from '$lib/apis';
 
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Switch from '$lib/components/common/Switch.svelte';
-	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
-	import { goto } from '$app/navigation';
+import Tooltip from '$lib/components/common/Tooltip.svelte';
+import Switch from '$lib/components/common/Switch.svelte';
+import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
+import Sparkles from '$lib/components/icons/Sparkles.svelte';
+import { goto } from '$app/navigation';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -540,27 +541,33 @@
 
 								<!-- {JSON.stringify(item.info)} -->
 
-								{#if item.model?.direct}
-									<Tooltip content={`${'Direct'}`}>
-										<div class="translate-y-[1px]">
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 16 16"
-												fill="currentColor"
-												class="size-3"
-											>
-												<path
-													fill-rule="evenodd"
-													d="M2 2.75A.75.75 0 0 1 2.75 2C8.963 2 14 7.037 14 13.25a.75.75 0 0 1-1.5 0c0-5.385-4.365-9.75-9.75-9.75A.75.75 0 0 1 2 2.75Zm0 4.5a.75.75 0 0 1 .75-.75 6.75 6.75 0 0 1 6.75 6.75.75.75 0 0 1-1.5 0C8 10.35 5.65 8 2.75 8A.75.75 0 0 1 2 7.25ZM3.5 11a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"
-													clip-rule="evenodd"
-												/>
-											</svg>
-										</div>
-									</Tooltip>
-								{:else if item.model.owned_by === 'openai'}
-									<Tooltip content={`${'External'}`}>
-										<div class="translate-y-[1px]">
-											<svg
+                                                                {#if item.model?.direct}
+                                                                        <Tooltip content={`${'Direct'}`}>
+                                                                                <div class="translate-y-[1px]">
+                                                                                        <svg
+                                                                                                xmlns="http://www.w3.org/2000/svg"
+                                                                                                viewBox="0 0 16 16"
+                                                                                                fill="currentColor"
+                                                                                                class="size-3"
+                                                                                        >
+                                                                                                <path
+                                                                                                        fill-rule="evenodd"
+                                                                                                        d="M2 2.75A.75.75 0 0 1 2.75 2C8.963 2 14 7.037 14 13.25a.75.75 0 0 1-1.5 0c0-5.385-4.365-9.75-9.75-9.75A.75.75 0 0 1 2 2.75Zm0 4.5a.75.75 0 0 1 .75-.75 6.75 6.75 0 0 1 6.75 6.75.75.75 0 0 1-1.5 0C8 10.35 5.65 8 2.75 8A.75.75 0 0 1 2 7.25ZM3.5 11a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"
+                                                                                                        clip-rule="evenodd"
+                                                                                                />
+                                                                                        </svg>
+                                                                                </div>
+                                                                        </Tooltip>
+                                                                {:else if item.model?.is_assistant}
+                                                                        <Tooltip content={`${'Assistant'}`}>
+                                                                                <div class="translate-y-[1px]">
+                                                                                        <Sparkles className="size-3" strokeWidth="1.75" />
+                                                                                </div>
+                                                                        </Tooltip>
+                                                                {:else if item.model.owned_by === 'openai'}
+                                                                        <Tooltip content={`${'External'}`}>
+                                                                                <div class="translate-y-[1px]">
+                                                                                        <svg
 												xmlns="http://www.w3.org/2000/svg"
 												viewBox="0 0 16 16"
 												fill="currentColor"

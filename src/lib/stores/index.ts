@@ -94,9 +94,10 @@ type BaseModel = {
 };
 
 export interface OpenAIModel extends BaseModel {
-	owned_by: 'openai';
-	external: boolean;
-	source?: string;
+        owned_by: 'openai';
+        external: boolean;
+        source?: string;
+        is_assistant?: boolean;
 }
 
 export interface OllamaModel extends BaseModel {
